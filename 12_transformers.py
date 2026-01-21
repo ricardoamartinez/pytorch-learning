@@ -3,464 +3,951 @@
 # =============================================================================
 # Transformers have revolutionized ML. Understanding them is essential for
 # modern world models like IRIS, Genie, and GAIA.
+#
+# Run interactively: python 12_transformers.py
+# Run tests only:    python 12_transformers.py --test
+# =============================================================================
+
+import sys
+sys.path.insert(0, '.')
+from utils.lesson_utils import LessonRunner, ExerciseTest, ask_question, show_progress
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
 
-# -----------------------------------------------------------------------------
-# THE CONCEPT: Transformer Architecture
-# -----------------------------------------------------------------------------
-"""
-"Attention Is All You Need" (Vaswani et al., 2017)
+# Create the lesson runner
+lesson = LessonRunner("Lesson 12: Transformers", total_points=10)
 
-Key innovations:
-1. Self-attention instead of recurrence
-2. Parallel processing (no sequential dependency)
-3. Better at long-range dependencies
-4. Scales to massive datasets
-
-ENCODER: Understands input (bidirectional attention)
-DECODER: Generates output (causal attention + cross-attention)
-
-For world models, we often use decoder-only (GPT-style) or
-encoder-only (BERT-style) architectures.
-"""
-
-# -----------------------------------------------------------------------------
-# STEP 1: Feed-Forward Network
-# -----------------------------------------------------------------------------
-print("=" * 60)
-print("TRANSFORMER COMPONENTS")
-print("=" * 60)
-
-class FeedForward(nn.Module):
+# =============================================================================
+# SECTION 1: The Transformer Architecture
+# =============================================================================
+@lesson.section("The Transformer Architecture")
+def section_1():
     """
-    Position-wise Feed-Forward Network.
-    Applied independently to each position.
-    FFN(x) = ReLU(xW_1 + b_1)W_2 + b_2
+    "ATTENTION IS ALL YOU NEED" (Vaswani et al., 2017)
+
+    Key innovations:
+    1. Self-attention instead of recurrence
+    2. Parallel processing (no sequential dependency)
+    3. Better at long-range dependencies
+    4. Scales to massive datasets
+
+    Two main variants:
+    - ENCODER-DECODER: For seq2seq (translation, summarization)
+    - DECODER-ONLY: For generation (GPT, language models)
     """
-    def __init__(self, d_model, d_ff, dropout=0.1):
-        super().__init__()
-        self.linear1 = nn.Linear(d_model, d_ff)
-        self.linear2 = nn.Linear(d_ff, d_model)
-        self.dropout = nn.Dropout(dropout)
+    print("The Transformer Architecture")
+    print("=" * 50)
 
-    def forward(self, x):
-        return self.linear2(self.dropout(F.relu(self.linear1(x))))
+    print("""
+    TRANSFORMER LAYER STRUCTURE
+    ===========================
 
-print("Feed-Forward: Linear -> ReLU -> Linear")
-print("Expands to d_ff (usually 4x d_model), then projects back")
-
-# -----------------------------------------------------------------------------
-# STEP 2: Layer Normalization
-# -----------------------------------------------------------------------------
-
-"""
-Layer Norm vs Batch Norm:
-- Batch Norm: normalize across batch dimension (used in CNNs)
-- Layer Norm: normalize across feature dimension (used in Transformers)
-
-Layer Norm is more stable for variable-length sequences.
-"""
-
-# PyTorch provides nn.LayerNorm
-layer_norm = nn.LayerNorm(512)
-x = torch.randn(2, 10, 512)
-x_normed = layer_norm(x)
-print(f"\nLayerNorm: {x.shape} -> {x_normed.shape}")
-
-# -----------------------------------------------------------------------------
-# STEP 3: Multi-Head Attention (from Lesson 11)
-# -----------------------------------------------------------------------------
-
-class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model, num_heads, dropout=0.1):
-        super().__init__()
-        assert d_model % num_heads == 0
-
-        self.d_model = d_model
-        self.num_heads = num_heads
-        self.d_k = d_model // num_heads
-
-        self.W_q = nn.Linear(d_model, d_model)
-        self.W_k = nn.Linear(d_model, d_model)
-        self.W_v = nn.Linear(d_model, d_model)
-        self.W_o = nn.Linear(d_model, d_model)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, query, key, value, mask=None):
-        batch_size = query.size(0)
-
-        Q = self.W_q(query).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
-        K = self.W_k(key).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
-        V = self.W_v(value).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
-
-        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
-        if mask is not None:
-            scores = scores.masked_fill(mask == 0, float('-inf'))
-
-        attn = self.dropout(F.softmax(scores, dim=-1))
-        context = torch.matmul(attn, V)
-
-        context = context.transpose(1, 2).contiguous().view(batch_size, -1, self.d_model)
-        return self.W_o(context), attn
-
-# -----------------------------------------------------------------------------
-# STEP 4: Transformer Encoder Layer
-# -----------------------------------------------------------------------------
-print("\n" + "=" * 60)
-print("TRANSFORMER ENCODER LAYER")
-print("=" * 60)
-
-class TransformerEncoderLayer(nn.Module):
-    """
-    Single encoder layer:
-    1. Multi-head self-attention
+    Each transformer layer has:
+    1. Multi-Head Attention
     2. Add & Norm (residual connection + layer norm)
-    3. Feed-forward network
+    3. Feed-Forward Network
     4. Add & Norm
-    """
-    def __init__(self, d_model, num_heads, d_ff, dropout=0.1):
-        super().__init__()
-        self.self_attn = MultiHeadAttention(d_model, num_heads, dropout)
-        self.feed_forward = FeedForward(d_model, d_ff, dropout)
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, mask=None):
-        # Self-attention with residual connection
-        attn_out, _ = self.self_attn(x, x, x, mask)
-        x = self.norm1(x + self.dropout(attn_out))
 
-        # Feed-forward with residual connection
-        ff_out = self.feed_forward(x)
-        x = self.norm2(x + self.dropout(ff_out))
+    ENCODER LAYER:
+    ==============
+    Input x
+        |
+        v
+    [Multi-Head Self-Attention]
+        |
+        v
+    [Add & LayerNorm] <-- residual from x
+        |
+        v
+    [Feed-Forward Network]
+        |
+        v
+    [Add & LayerNorm] <-- residual
+        |
+        v
+    Output
 
-        return x
 
-encoder_layer = TransformerEncoderLayer(d_model=512, num_heads=8, d_ff=2048)
-print(encoder_layer)
-
-# Test
-x = torch.randn(2, 10, 512)
-out = encoder_layer(x)
-print(f"\nInput:  {x.shape}")
-print(f"Output: {out.shape}")
-
-# -----------------------------------------------------------------------------
-# STEP 5: Transformer Decoder Layer
-# -----------------------------------------------------------------------------
-print("\n" + "=" * 60)
-print("TRANSFORMER DECODER LAYER")
-print("=" * 60)
-
-class TransformerDecoderLayer(nn.Module):
-    """
-    Single decoder layer:
-    1. Masked multi-head self-attention (causal)
+    DECODER LAYER (additional cross-attention):
+    ===========================================
+    1. Masked Self-Attention (causal)
     2. Add & Norm
-    3. Multi-head cross-attention (attend to encoder)
+    3. Cross-Attention (to encoder output)
     4. Add & Norm
-    5. Feed-forward network
+    5. Feed-Forward
     6. Add & Norm
+    """)
+
+    print("-" * 50)
+    print("WHY TRANSFORMERS DOMINATE")
+    print("-" * 50)
+    print("""
+    vs RNNs:
+    - Parallel training (10-100x faster)
+    - No vanishing gradients over long distances
+    - Direct attention to any position
+
+    vs CNNs:
+    - Global context from first layer
+    - Better for variable-length sequences
+    - More flexible receptive field
+    """)
+
+# -----------------------------------------------------------------------------
+# QUIZ 1
+# -----------------------------------------------------------------------------
+@lesson.exercise("Quiz: Transformer Basics", points=1)
+def quiz_1():
+    if '--test' not in sys.argv:
+        answer = ask_question(
+            "What is a key advantage of Transformers over RNNs?",
+            [
+                "Transformers use less memory",
+                "Transformers can be trained in parallel (not sequential)",
+                "Transformers are simpler to implement",
+                "Transformers don't need positional encoding"
+            ]
+        )
+        return answer == 1
+    return True
+
+# =============================================================================
+# SECTION 2: Feed-Forward Network
+# =============================================================================
+@lesson.section("Feed-Forward Network")
+def section_2():
     """
-    def __init__(self, d_model, num_heads, d_ff, dropout=0.1):
-        super().__init__()
-        self.self_attn = MultiHeadAttention(d_model, num_heads, dropout)
-        self.cross_attn = MultiHeadAttention(d_model, num_heads, dropout)
-        self.feed_forward = FeedForward(d_model, d_ff, dropout)
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.norm3 = nn.LayerNorm(d_model)
-        self.dropout = nn.Dropout(dropout)
+    POSITION-WISE FEED-FORWARD NETWORK
+    ==================================
 
-    def forward(self, x, encoder_output, self_mask=None, cross_mask=None):
-        # Masked self-attention
-        attn_out, _ = self.self_attn(x, x, x, self_mask)
-        x = self.norm1(x + self.dropout(attn_out))
+    Applied to each position independently.
+    FFN(x) = ReLU(x @ W1 + b1) @ W2 + b2
 
-        # Cross-attention to encoder output
-        attn_out, _ = self.cross_attn(x, encoder_output, encoder_output, cross_mask)
-        x = self.norm2(x + self.dropout(attn_out))
+    Typically expands dimension by 4x, then projects back.
+    """
+    print("Feed-Forward Network")
+    print("=" * 50)
 
-        # Feed-forward
-        ff_out = self.feed_forward(x)
-        x = self.norm3(x + self.dropout(ff_out))
+    class FeedForward(nn.Module):
+        def __init__(self, d_model, d_ff, dropout=0.1):
+            super().__init__()
+            self.linear1 = nn.Linear(d_model, d_ff)
+            self.linear2 = nn.Linear(d_ff, d_model)
+            self.dropout = nn.Dropout(dropout)
 
-        return x
+        def forward(self, x):
+            return self.linear2(self.dropout(F.relu(self.linear1(x))))
 
-decoder_layer = TransformerDecoderLayer(d_model=512, num_heads=8, d_ff=2048)
-print(decoder_layer)
+    # Example
+    ff = FeedForward(d_model=512, d_ff=2048)
 
-# -----------------------------------------------------------------------------
-# STEP 6: Positional Encoding
-# -----------------------------------------------------------------------------
+    print("Feed-Forward structure:")
+    print(f"  d_model: 512")
+    print(f"  d_ff: 2048 (4x expansion)")
+    print(f"  Linear(512 -> 2048) -> ReLU -> Linear(2048 -> 512)")
 
-class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_len=5000, dropout=0.1):
-        super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
+    x = torch.randn(2, 10, 512)
+    out = ff(x)
+    print(f"\n  Input:  {x.shape}")
+    print(f"  Output: {out.shape}")
 
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+    print("\n" + "-" * 50)
+    print("WHY EXPAND AND PROJECT?")
+    print("-" * 50)
+    print("""
+    The expansion allows:
+    - More expressive transformations
+    - Non-linear feature combinations
+    - Similar to "wide" layers in MLPs
 
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0)
-        self.register_buffer('pe', pe)
+    Think of it as a 2-layer MLP applied to each position.
+    """)
 
-    def forward(self, x):
-        x = x + self.pe[:, :x.size(1), :]
-        return self.dropout(x)
+    return FeedForward
 
 # -----------------------------------------------------------------------------
-# STEP 7: Complete Transformer (Encoder-Decoder)
+# EXERCISE 1: Build Feed-Forward
 # -----------------------------------------------------------------------------
-print("\n" + "=" * 60)
-print("COMPLETE TRANSFORMER")
-print("=" * 60)
+@lesson.exercise("Exercise: Feed-Forward Network", points=1)
+def exercise_1():
+    """Build a feed-forward network."""
+    test = ExerciseTest("Feed-Forward")
 
-class Transformer(nn.Module):
-    """Full encoder-decoder transformer for seq2seq tasks."""
+    class FFN(nn.Module):
+        def __init__(self, d_model, d_ff):
+            super().__init__()
+            self.fc1 = nn.Linear(d_model, d_ff)
+            self.fc2 = nn.Linear(d_ff, d_model)
 
-    def __init__(self, src_vocab_size, tgt_vocab_size, d_model=512,
-                 num_heads=8, num_layers=6, d_ff=2048, dropout=0.1):
-        super().__init__()
+        def forward(self, x):
+            return self.fc2(F.relu(self.fc1(x)))
 
-        self.d_model = d_model
+    ffn = FFN(d_model=64, d_ff=256)
+    x = torch.randn(2, 10, 64)
+    out = ffn(x)
 
-        # Embeddings
-        self.src_embedding = nn.Embedding(src_vocab_size, d_model)
-        self.tgt_embedding = nn.Embedding(tgt_vocab_size, d_model)
-        self.pos_encoding = PositionalEncoding(d_model, dropout=dropout)
+    test.check_shape(out, (2, 10, 64), "output shape matches input")
+    test.check_true(ffn.fc1.out_features == 256, "expansion to d_ff")
+    test.check_true(ffn.fc2.out_features == 64, "projection back to d_model")
 
-        # Encoder and Decoder layers
-        self.encoder_layers = nn.ModuleList([
-            TransformerEncoderLayer(d_model, num_heads, d_ff, dropout)
-            for _ in range(num_layers)
+    return test.run()
+
+# =============================================================================
+# SECTION 3: Transformer Encoder Layer
+# =============================================================================
+@lesson.section("Transformer Encoder Layer")
+def section_3():
+    """
+    ENCODER LAYER
+    =============
+
+    1. Multi-head self-attention
+    2. Add & Norm
+    3. Feed-forward
+    4. Add & Norm
+    """
+    print("Transformer Encoder Layer")
+    print("=" * 50)
+
+    class MultiHeadAttention(nn.Module):
+        def __init__(self, d_model, num_heads, dropout=0.1):
+            super().__init__()
+            self.d_model = d_model
+            self.num_heads = num_heads
+            self.d_k = d_model // num_heads
+            self.W_q = nn.Linear(d_model, d_model)
+            self.W_k = nn.Linear(d_model, d_model)
+            self.W_v = nn.Linear(d_model, d_model)
+            self.W_o = nn.Linear(d_model, d_model)
+            self.dropout = nn.Dropout(dropout)
+
+        def forward(self, q, k, v, mask=None):
+            batch = q.size(0)
+            Q = self.W_q(q).view(batch, -1, self.num_heads, self.d_k).transpose(1, 2)
+            K = self.W_k(k).view(batch, -1, self.num_heads, self.d_k).transpose(1, 2)
+            V = self.W_v(v).view(batch, -1, self.num_heads, self.d_k).transpose(1, 2)
+            scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
+            if mask is not None:
+                scores = scores.masked_fill(mask == 0, float('-inf'))
+            attn = self.dropout(F.softmax(scores, dim=-1))
+            out = torch.matmul(attn, V)
+            out = out.transpose(1, 2).contiguous().view(batch, -1, self.d_model)
+            return self.W_o(out)
+
+    class FeedForward(nn.Module):
+        def __init__(self, d_model, d_ff, dropout=0.1):
+            super().__init__()
+            self.net = nn.Sequential(
+                nn.Linear(d_model, d_ff),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(d_ff, d_model),
+            )
+        def forward(self, x):
+            return self.net(x)
+
+    class EncoderLayer(nn.Module):
+        def __init__(self, d_model, num_heads, d_ff, dropout=0.1):
+            super().__init__()
+            self.self_attn = MultiHeadAttention(d_model, num_heads, dropout)
+            self.ff = FeedForward(d_model, d_ff, dropout)
+            self.norm1 = nn.LayerNorm(d_model)
+            self.norm2 = nn.LayerNorm(d_model)
+            self.dropout = nn.Dropout(dropout)
+
+        def forward(self, x, mask=None):
+            # Self-attention with residual
+            attn_out = self.self_attn(x, x, x, mask)
+            x = self.norm1(x + self.dropout(attn_out))
+            # Feed-forward with residual
+            ff_out = self.ff(x)
+            x = self.norm2(x + self.dropout(ff_out))
+            return x
+
+    layer = EncoderLayer(d_model=512, num_heads=8, d_ff=2048)
+
+    print("Encoder Layer components:")
+    print("  1. MultiHeadAttention(d_model=512, heads=8)")
+    print("  2. LayerNorm + Residual")
+    print("  3. FeedForward(512 -> 2048 -> 512)")
+    print("  4. LayerNorm + Residual")
+
+    x = torch.randn(2, 10, 512)
+    out = layer(x)
+    print(f"\n  Input:  {x.shape}")
+    print(f"  Output: {out.shape}")
+
+    return EncoderLayer
+
+# -----------------------------------------------------------------------------
+# QUIZ 2
+# -----------------------------------------------------------------------------
+@lesson.exercise("Quiz: Residual Connections", points=1)
+def quiz_2():
+    if '--test' not in sys.argv:
+        answer = ask_question(
+            "What is the purpose of residual connections in Transformers?",
+            [
+                "To reduce memory usage",
+                "To allow gradients to flow and enable deeper networks",
+                "To speed up inference",
+                "To reduce the number of parameters"
+            ]
+        )
+        return answer == 1
+    return True
+
+# =============================================================================
+# SECTION 4: Decoder-Only Transformer (GPT)
+# =============================================================================
+@lesson.section("Decoder-Only Transformer (GPT)")
+def section_4():
+    """
+    GPT-STYLE ARCHITECTURE
+    ======================
+
+    For autoregressive generation:
+    - No encoder, just decoder
+    - Causal masking: can only attend to past
+    - Used in GPT, LLaMA, and world models
+    """
+    print("Decoder-Only Transformer (GPT-style)")
+    print("=" * 50)
+
+    class GPTBlock(nn.Module):
+        def __init__(self, d_model, num_heads, d_ff, dropout=0.1):
+            super().__init__()
+            self.d_model = d_model
+            self.num_heads = num_heads
+            self.d_k = d_model // num_heads
+
+            self.W_q = nn.Linear(d_model, d_model)
+            self.W_k = nn.Linear(d_model, d_model)
+            self.W_v = nn.Linear(d_model, d_model)
+            self.W_o = nn.Linear(d_model, d_model)
+
+            self.ff = nn.Sequential(
+                nn.Linear(d_model, d_ff),
+                nn.GELU(),
+                nn.Linear(d_ff, d_model),
+            )
+            self.ln1 = nn.LayerNorm(d_model)
+            self.ln2 = nn.LayerNorm(d_model)
+            self.dropout = nn.Dropout(dropout)
+
+        def forward(self, x):
+            batch, seq_len = x.size(0), x.size(1)
+
+            # Pre-norm attention
+            h = self.ln1(x)
+            Q = self.W_q(h).view(batch, seq_len, self.num_heads, self.d_k).transpose(1, 2)
+            K = self.W_k(h).view(batch, seq_len, self.num_heads, self.d_k).transpose(1, 2)
+            V = self.W_v(h).view(batch, seq_len, self.num_heads, self.d_k).transpose(1, 2)
+
+            # Causal mask
+            mask = torch.tril(torch.ones(seq_len, seq_len, device=x.device))
+            scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
+            scores = scores.masked_fill(mask == 0, float('-inf'))
+            attn = F.softmax(scores, dim=-1)
+            out = torch.matmul(attn, V)
+            out = out.transpose(1, 2).contiguous().view(batch, seq_len, self.d_model)
+            out = self.W_o(out)
+
+            x = x + self.dropout(out)
+
+            # Pre-norm feed-forward
+            x = x + self.dropout(self.ff(self.ln2(x)))
+            return x
+
+    block = GPTBlock(d_model=256, num_heads=4, d_ff=1024)
+
+    print("GPT Block structure:")
+    print("  Pre-LayerNorm (more stable training)")
+    print("  Causal self-attention (built-in mask)")
+    print("  Residual connection")
+    print("  Pre-LayerNorm")
+    print("  Feed-forward with GELU activation")
+    print("  Residual connection")
+
+    x = torch.randn(2, 10, 256)
+    out = block(x)
+    print(f"\n  Input:  {x.shape}")
+    print(f"  Output: {out.shape}")
+
+    return GPTBlock
+
+# -----------------------------------------------------------------------------
+# EXERCISE 2: GPT Block
+# -----------------------------------------------------------------------------
+@lesson.exercise("Exercise: Simple GPT Block", points=1)
+def exercise_2():
+    """Build a simplified GPT block."""
+    test = ExerciseTest("GPT Block")
+
+    class SimpleGPTBlock(nn.Module):
+        def __init__(self, d_model, num_heads):
+            super().__init__()
+            self.d_model = d_model
+            self.num_heads = num_heads
+            self.d_k = d_model // num_heads
+            self.attn = nn.Linear(d_model, 3 * d_model)  # Q, K, V together
+            self.proj = nn.Linear(d_model, d_model)
+            self.ff = nn.Sequential(
+                nn.Linear(d_model, 4 * d_model),
+                nn.GELU(),
+                nn.Linear(4 * d_model, d_model),
+            )
+            self.ln1 = nn.LayerNorm(d_model)
+            self.ln2 = nn.LayerNorm(d_model)
+
+        def forward(self, x):
+            batch, seq = x.size(0), x.size(1)
+
+            # Attention
+            h = self.ln1(x)
+            qkv = self.attn(h).chunk(3, dim=-1)
+            Q, K, V = [t.view(batch, seq, self.num_heads, self.d_k).transpose(1, 2) for t in qkv]
+
+            mask = torch.tril(torch.ones(seq, seq, device=x.device)).unsqueeze(0).unsqueeze(0)
+            scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
+            scores = scores.masked_fill(mask == 0, float('-inf'))
+            attn = F.softmax(scores, dim=-1)
+            out = torch.matmul(attn, V).transpose(1, 2).contiguous().view(batch, seq, self.d_model)
+            x = x + self.proj(out)
+
+            # Feed-forward
+            x = x + self.ff(self.ln2(x))
+            return x
+
+    block = SimpleGPTBlock(d_model=64, num_heads=4)
+    x = torch.randn(2, 8, 64)
+    out = block(x)
+
+    test.check_shape(out, (2, 8, 64), "output shape")
+    test.check_true(block.d_k == 16, "d_k = d_model / num_heads")
+
+    return test.run()
+
+# =============================================================================
+# SECTION 5: Complete GPT Model
+# =============================================================================
+@lesson.section("Complete GPT Model")
+def section_5():
+    """
+    FULL GPT MODEL
+    ==============
+
+    - Token embeddings
+    - Positional embeddings
+    - Stack of GPT blocks
+    - Final projection to vocabulary
+    """
+    print("Complete GPT Model")
+    print("=" * 50)
+
+    class GPT(nn.Module):
+        def __init__(self, vocab_size, d_model, num_heads, num_layers, max_len=512):
+            super().__init__()
+            self.d_model = d_model
+            self.token_emb = nn.Embedding(vocab_size, d_model)
+            self.pos_emb = nn.Embedding(max_len, d_model)
+
+            # Simplified blocks
+            self.blocks = nn.ModuleList([
+                nn.TransformerEncoderLayer(
+                    d_model=d_model,
+                    nhead=num_heads,
+                    dim_feedforward=4*d_model,
+                    batch_first=True,
+                ) for _ in range(num_layers)
+            ])
+            self.ln_f = nn.LayerNorm(d_model)
+            self.head = nn.Linear(d_model, vocab_size, bias=False)
+
+        def forward(self, x):
+            batch, seq = x.shape
+            tok_emb = self.token_emb(x)
+            pos = torch.arange(seq, device=x.device).unsqueeze(0)
+            pos_emb = self.pos_emb(pos)
+            x = tok_emb + pos_emb
+
+            # Causal mask
+            mask = nn.Transformer.generate_square_subsequent_mask(seq, device=x.device)
+
+            for block in self.blocks:
+                x = block(x, src_mask=mask, is_causal=True)
+
+            x = self.ln_f(x)
+            return self.head(x)
+
+        @torch.no_grad()
+        def generate(self, idx, max_new_tokens, temperature=1.0):
+            for _ in range(max_new_tokens):
+                logits = self(idx)[:, -1, :] / temperature
+                probs = F.softmax(logits, dim=-1)
+                next_tok = torch.multinomial(probs, num_samples=1)
+                idx = torch.cat([idx, next_tok], dim=1)
+            return idx
+
+    gpt = GPT(vocab_size=1000, d_model=128, num_heads=4, num_layers=4)
+    params = sum(p.numel() for p in gpt.parameters())
+
+    print(f"GPT Configuration:")
+    print(f"  Vocab size: 1000")
+    print(f"  d_model: 128")
+    print(f"  Heads: 4")
+    print(f"  Layers: 4")
+    print(f"  Parameters: {params:,}")
+
+    # Test forward
+    x = torch.randint(0, 1000, (2, 20))
+    logits = gpt(x)
+    print(f"\n  Input tokens: {x.shape}")
+    print(f"  Output logits: {logits.shape}")
+
+    # Test generation
+    start = torch.randint(0, 1000, (1, 5))
+    generated = gpt.generate(start, max_new_tokens=10)
+    print(f"\n  Start: {start.shape}")
+    print(f"  Generated: {generated.shape}")
+
+    return GPT
+
+# -----------------------------------------------------------------------------
+# QUIZ 3
+# -----------------------------------------------------------------------------
+@lesson.exercise("Quiz: GPT Generation", points=1)
+def quiz_3():
+    if '--test' not in sys.argv:
+        answer = ask_question(
+            "How does GPT generate text autoregressively?",
+            [
+                "It generates all tokens at once",
+                "It predicts one token at a time, feeding it back as input",
+                "It uses a separate decoder network",
+                "It requires ground truth for each step"
+            ]
+        )
+        return answer == 1
+    return True
+
+# =============================================================================
+# SECTION 6: PyTorch Built-in Transformer
+# =============================================================================
+@lesson.section("PyTorch Built-in Transformer")
+def section_6():
+    """
+    PYTORCH TRANSFORMER MODULES
+    ===========================
+
+    PyTorch provides optimized implementations.
+    """
+    print("PyTorch Built-in Transformer")
+    print("=" * 50)
+
+    # TransformerEncoderLayer
+    encoder_layer = nn.TransformerEncoderLayer(
+        d_model=256,
+        nhead=8,
+        dim_feedforward=1024,
+        batch_first=True
+    )
+
+    x = torch.randn(2, 10, 256)
+    out = encoder_layer(x)
+    print("nn.TransformerEncoderLayer:")
+    print(f"  Input:  {x.shape}")
+    print(f"  Output: {out.shape}")
+
+    # TransformerEncoder (stack of layers)
+    encoder = nn.TransformerEncoder(encoder_layer, num_layers=6)
+    out = encoder(x)
+    print(f"\nnn.TransformerEncoder (6 layers):")
+    print(f"  Input:  {x.shape}")
+    print(f"  Output: {out.shape}")
+
+    # Full Transformer
+    transformer = nn.Transformer(
+        d_model=256,
+        nhead=8,
+        num_encoder_layers=4,
+        num_decoder_layers=4,
+        dim_feedforward=1024,
+        batch_first=True
+    )
+
+    src = torch.randn(2, 10, 256)
+    tgt = torch.randn(2, 15, 256)
+    out = transformer(src, tgt)
+    print(f"\nnn.Transformer (full encoder-decoder):")
+    print(f"  Source: {src.shape}")
+    print(f"  Target: {tgt.shape}")
+    print(f"  Output: {out.shape}")
+
+    return encoder_layer
+
+# -----------------------------------------------------------------------------
+# EXERCISE 3: PyTorch Transformer
+# -----------------------------------------------------------------------------
+@lesson.exercise("Exercise: Use PyTorch Transformer", points=1)
+def exercise_3():
+    """Use PyTorch's built-in transformer."""
+    test = ExerciseTest("PyTorch Transformer")
+
+    encoder_layer = nn.TransformerEncoderLayer(
+        d_model=64,
+        nhead=4,
+        dim_feedforward=256,
+        batch_first=True
+    )
+    encoder = nn.TransformerEncoder(encoder_layer, num_layers=2)
+
+    x = torch.randn(4, 8, 64)
+    out = encoder(x)
+
+    test.check_shape(out, (4, 8, 64), "encoder output shape")
+    test.check_true(
+        isinstance(encoder.layers[0], nn.TransformerEncoderLayer),
+        "uses TransformerEncoderLayer"
+    )
+
+    return test.run()
+
+# =============================================================================
+# SECTION 7: Positional Embeddings
+# =============================================================================
+@lesson.section("Positional Embeddings")
+def section_7():
+    """
+    LEARNED VS SINUSOIDAL POSITIONAL EMBEDDINGS
+    ==========================================
+
+    Sinusoidal: Fixed, can extrapolate
+    Learned: More flexible, limited to max_len
+    """
+    print("Positional Embeddings")
+    print("=" * 50)
+
+    # Sinusoidal (from Lesson 11)
+    class SinusoidalPE(nn.Module):
+        def __init__(self, d_model, max_len=512):
+            super().__init__()
+            pe = torch.zeros(max_len, d_model)
+            pos = torch.arange(max_len).float().unsqueeze(1)
+            div = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+            pe[:, 0::2] = torch.sin(pos * div)
+            pe[:, 1::2] = torch.cos(pos * div)
+            self.register_buffer('pe', pe.unsqueeze(0))
+
+        def forward(self, x):
+            return x + self.pe[:, :x.size(1)]
+
+    # Learned (GPT-style)
+    class LearnedPE(nn.Module):
+        def __init__(self, d_model, max_len=512):
+            super().__init__()
+            self.pe = nn.Embedding(max_len, d_model)
+
+        def forward(self, x):
+            pos = torch.arange(x.size(1), device=x.device)
+            return x + self.pe(pos)
+
+    print("Comparison:")
+    print("-" * 50)
+    print("SINUSOIDAL:")
+    print("  + No extra parameters")
+    print("  + Can extrapolate to longer sequences")
+    print("  - Less flexible")
+    print("\nLEARNED:")
+    print("  + More flexible (learned from data)")
+    print("  + Often works better in practice")
+    print("  - Limited to max_len")
+    print("  - More parameters")
+
+    # Demo
+    sin_pe = SinusoidalPE(d_model=64, max_len=100)
+    learn_pe = LearnedPE(d_model=64, max_len=100)
+
+    x = torch.randn(2, 10, 64)
+    print(f"\n  Input: {x.shape}")
+    print(f"  Sinusoidal PE output: {sin_pe(x).shape}")
+    print(f"  Learned PE output: {learn_pe(x).shape}")
+
+    return SinusoidalPE, LearnedPE
+
+# -----------------------------------------------------------------------------
+# EXERCISE 4: Positional Embeddings
+# -----------------------------------------------------------------------------
+@lesson.exercise("Exercise: Positional Embeddings", points=1)
+def exercise_4():
+    """Compare positional embedding types."""
+    test = ExerciseTest("Positional Embeddings")
+
+    class LearnedPE(nn.Module):
+        def __init__(self, d_model, max_len):
+            super().__init__()
+            self.pe = nn.Embedding(max_len, d_model)
+
+        def forward(self, x):
+            pos = torch.arange(x.size(1), device=x.device)
+            return x + self.pe(pos)
+
+    pe = LearnedPE(d_model=32, max_len=50)
+    x = torch.zeros(2, 10, 32)
+    out = pe(x)
+
+    # Different positions should have different encodings
+    test.check_true(
+        not torch.allclose(out[0, 0], out[0, 1]),
+        "different positions have different embeddings"
+    )
+
+    # Same position in different batches should be same
+    test.check_true(
+        torch.allclose(out[0, 0], out[1, 0]),
+        "same position same across batch"
+    )
+
+    return test.run()
+
+# =============================================================================
+# SECTION 8: Transformers for World Models
+# =============================================================================
+@lesson.section("Transformers for World Models")
+def section_8():
+    """
+    TRANSFORMERS IN WORLD MODELS
+    ============================
+
+    Modern world models increasingly use Transformers
+    instead of RNNs for dynamics modeling.
+    """
+    print("Transformers for World Models")
+    print("=" * 50)
+
+    print("""
+    WHY TRANSFORMERS FOR WORLD MODELS?
+    ==================================
+
+    1. PARALLEL TRAINING
+       - RNNs: Process steps sequentially (slow!)
+       - Transformers: All steps at once (fast!)
+       - 10-100x speedup in training
+
+    2. LONG-RANGE DEPENDENCIES
+       - Direct attention to distant past states
+       - No information bottleneck
+
+    3. SCALABILITY
+       - Transformers scale better with data/compute
+       - Bigger models = better performance
+
+
+    TRANSFORMER WORLD MODEL EXAMPLES
+    ================================
+
+    IRIS (2023):
+    - Discretize latent space (VQ-VAE)
+    - Transformer predicts next latent tokens
+    - State-of-the-art on Atari
+
+    GENIE (2024):
+    - Learns world model from videos
+    - Generates playable video game worlds
+    - Attention over video frames
+
+    GAIA-1 (2023):
+    - World model for autonomous driving
+    - Attention over past frames + actions
+    - Generates realistic driving videos
+
+
+    ARCHITECTURE PATTERN
+    ====================
+
+    [Observation] -> [VAE Encoder] -> [Discrete Tokens]
+                                           |
+    [Action] -----> [Transformer] ----> [Next Tokens]
+                                           |
+                   [VAE Decoder] <- [Predicted Tokens]
+                         |
+                    [Predicted Frame]
+    """)
+
+    print("-" * 50)
+    print("SIMPLE WORLD MODEL TRANSFORMER")
+    print("-" * 50)
+
+    class WorldModelTransformer(nn.Module):
+        """Simplified transformer for world modeling."""
+        def __init__(self, state_dim, action_dim, d_model, num_heads, num_layers):
+            super().__init__()
+            self.state_proj = nn.Linear(state_dim, d_model)
+            self.action_proj = nn.Linear(action_dim, d_model)
+            self.pos_emb = nn.Embedding(100, d_model)
+
+            encoder_layer = nn.TransformerEncoderLayer(
+                d_model=d_model, nhead=num_heads,
+                dim_feedforward=4*d_model, batch_first=True
+            )
+            self.transformer = nn.TransformerEncoder(encoder_layer, num_layers)
+
+            self.output = nn.Linear(d_model, state_dim)
+
+        def forward(self, states, actions):
+            """
+            states: (batch, seq, state_dim)
+            actions: (batch, seq, action_dim)
+            """
+            batch, seq = states.shape[:2]
+
+            # Project to d_model
+            state_emb = self.state_proj(states)
+            action_emb = self.action_proj(actions)
+
+            # Interleave: s1, a1, s2, a2, ...
+            x = torch.stack([state_emb, action_emb], dim=2).view(batch, 2*seq, -1)
+
+            # Add positional embedding
+            pos = torch.arange(2*seq, device=x.device)
+            x = x + self.pos_emb(pos)
+
+            # Causal mask
+            mask = nn.Transformer.generate_square_subsequent_mask(2*seq, device=x.device)
+
+            # Transform
+            x = self.transformer(x, mask=mask, is_causal=True)
+
+            # Predict next states (from action positions)
+            return self.output(x[:, 1::2, :])  # Every other position
+
+    model = WorldModelTransformer(
+        state_dim=32, action_dim=4,
+        d_model=64, num_heads=4, num_layers=2
+    )
+
+    states = torch.randn(2, 10, 32)
+    actions = torch.randn(2, 10, 4)
+    next_states = model(states, actions)
+
+    print(f"Input states:      {states.shape}")
+    print(f"Input actions:     {actions.shape}")
+    print(f"Predicted states:  {next_states.shape}")
+
+# -----------------------------------------------------------------------------
+# FINAL CHALLENGE
+# -----------------------------------------------------------------------------
+@lesson.exercise("Final Challenge: Mini Transformer", points=2)
+def final_challenge():
+    """Build a complete mini transformer."""
+    test = ExerciseTest("Mini Transformer")
+
+    class MiniTransformer(nn.Module):
+        def __init__(self, vocab_size, d_model, num_heads, num_layers, max_len=128):
+            super().__init__()
+            self.tok_emb = nn.Embedding(vocab_size, d_model)
+            self.pos_emb = nn.Embedding(max_len, d_model)
+
+            encoder_layer = nn.TransformerEncoderLayer(
+                d_model=d_model, nhead=num_heads,
+                dim_feedforward=4*d_model, batch_first=True
+            )
+            self.encoder = nn.TransformerEncoder(encoder_layer, num_layers)
+            self.ln = nn.LayerNorm(d_model)
+            self.head = nn.Linear(d_model, vocab_size)
+
+        def forward(self, x):
+            seq = x.size(1)
+            x = self.tok_emb(x) + self.pos_emb(torch.arange(seq, device=x.device))
+            mask = nn.Transformer.generate_square_subsequent_mask(seq, device=x.device)
+            x = self.encoder(x, mask=mask, is_causal=True)
+            return self.head(self.ln(x))
+
+    # Test
+    model = MiniTransformer(vocab_size=100, d_model=32, num_heads=2, num_layers=2)
+    x = torch.randint(0, 100, (4, 16))
+    logits = model(x)
+
+    test.check_shape(logits, (4, 16, 100), "output logits shape")
+    test.check_true(
+        hasattr(model, 'tok_emb') and hasattr(model, 'pos_emb'),
+        "has token and positional embeddings"
+    )
+    test.check_true(
+        isinstance(model.encoder, nn.TransformerEncoder),
+        "uses TransformerEncoder"
+    )
+
+    if test.run():
+        print("\nYour mini transformer is complete!")
+        print("This architecture can be used for language modeling and world models.")
+        return True
+    return False
+
+# =============================================================================
+# MAIN
+# =============================================================================
+def main():
+    if '--test' in sys.argv:
+        results = []
+        results.append(("Quiz 1", quiz_1()))
+        results.append(("Exercise 1", exercise_1()))
+        results.append(("Quiz 2", quiz_2()))
+        results.append(("Exercise 2", exercise_2()))
+        results.append(("Quiz 3", quiz_3()))
+        results.append(("Exercise 3", exercise_3()))
+        results.append(("Exercise 4", exercise_4()))
+        results.append(("Final Challenge", final_challenge()))
+
+        print("\n" + "=" * 60)
+        print("TEST RESULTS")
+        print("=" * 60)
+        passed = sum(1 for _, r in results if r)
+        for name, result in results:
+            status = "PASS" if result else "FAIL"
+            print(f"  {status}: {name}")
+        print(f"\nTotal: {passed}/{len(results)} tests passed")
+        return passed == len(results)
+    else:
+        lesson.run_interactive([
+            section_1, quiz_1,
+            section_2, exercise_1,
+            section_3, quiz_2,
+            section_4, exercise_2,
+            section_5, quiz_3,
+            section_6, exercise_3,
+            section_7, exercise_4,
+            section_8, final_challenge,
         ])
-        self.decoder_layers = nn.ModuleList([
-            TransformerDecoderLayer(d_model, num_heads, d_ff, dropout)
-            for _ in range(num_layers)
-        ])
+        show_progress()
+        print("\n" + "=" * 60)
+        print("LESSON 12 COMPLETE!")
+        print("=" * 60)
+        print("""
+        KEY TAKEAWAYS:
 
-        # Output projection
-        self.output_proj = nn.Linear(d_model, tgt_vocab_size)
+        1. Transformers: Self-attention + Feed-forward + Residuals
+           - Parallel training, better long-range dependencies
 
-    def encode(self, src, src_mask=None):
-        x = self.src_embedding(src) * math.sqrt(self.d_model)
-        x = self.pos_encoding(x)
-        for layer in self.encoder_layers:
-            x = layer(x, src_mask)
-        return x
+        2. Encoder layer: Self-attention -> Add&Norm -> FF -> Add&Norm
 
-    def decode(self, tgt, encoder_output, tgt_mask=None, cross_mask=None):
-        x = self.tgt_embedding(tgt) * math.sqrt(self.d_model)
-        x = self.pos_encoding(x)
-        for layer in self.decoder_layers:
-            x = layer(x, encoder_output, tgt_mask, cross_mask)
-        return x
+        3. Decoder-only (GPT): Causal masking for autoregressive generation
 
-    def forward(self, src, tgt, src_mask=None, tgt_mask=None):
-        encoder_output = self.encode(src, src_mask)
-        decoder_output = self.decode(tgt, encoder_output, tgt_mask)
-        logits = self.output_proj(decoder_output)
-        return logits
+        4. Positional embeddings: Sinusoidal or Learned
 
-# Create transformer
-transformer = Transformer(
-    src_vocab_size=10000,
-    tgt_vocab_size=10000,
-    d_model=512,
-    num_heads=8,
-    num_layers=6,
-    d_ff=2048
-)
+        5. PyTorch provides nn.TransformerEncoder/Decoder
 
-# Count parameters
-total_params = sum(p.numel() for p in transformer.parameters())
-print(f"Total parameters: {total_params:,}")
+        6. World models use Transformers for:
+           - Faster training (parallel)
+           - Better temporal modeling
+           - State-of-the-art results (IRIS, GENIE)
 
-# Test
-src = torch.randint(0, 10000, (2, 20))  # batch=2, src_len=20
-tgt = torch.randint(0, 10000, (2, 15))  # batch=2, tgt_len=15
-logits = transformer(src, tgt)
-print(f"\nSource:  {src.shape}")
-print(f"Target:  {tgt.shape}")
-print(f"Logits:  {logits.shape}")
+        NEXT: Lesson 13 - Reinforcement Learning
+        """)
 
-# -----------------------------------------------------------------------------
-# STEP 8: Decoder-Only Transformer (GPT-style)
-# -----------------------------------------------------------------------------
-print("\n" + "=" * 60)
-print("DECODER-ONLY TRANSFORMER (GPT-STYLE)")
-print("=" * 60)
-
-"""
-For autoregressive generation (language models, world models):
-- No encoder, just decoder
-- Causal masking: can only attend to past
-- Used in GPT, LLaMA, and many world models
-"""
-
-class GPTBlock(nn.Module):
-    """Single GPT-style transformer block."""
-    def __init__(self, d_model, num_heads, d_ff, dropout=0.1):
-        super().__init__()
-        self.attn = MultiHeadAttention(d_model, num_heads, dropout)
-        self.ff = FeedForward(d_model, d_ff, dropout)
-        self.ln1 = nn.LayerNorm(d_model)
-        self.ln2 = nn.LayerNorm(d_model)
-
-    def forward(self, x, mask=None):
-        # Pre-norm architecture (more stable)
-        attn_out, _ = self.attn(self.ln1(x), self.ln1(x), self.ln1(x), mask)
-        x = x + attn_out
-        x = x + self.ff(self.ln2(x))
-        return x
-
-class GPT(nn.Module):
-    """Decoder-only transformer for autoregressive modeling."""
-    def __init__(self, vocab_size, d_model=512, num_heads=8,
-                 num_layers=6, d_ff=2048, max_len=1024, dropout=0.1):
-        super().__init__()
-        self.d_model = d_model
-
-        self.token_embedding = nn.Embedding(vocab_size, d_model)
-        self.pos_embedding = nn.Embedding(max_len, d_model)
-
-        self.blocks = nn.ModuleList([
-            GPTBlock(d_model, num_heads, d_ff, dropout)
-            for _ in range(num_layers)
-        ])
-
-        self.ln_f = nn.LayerNorm(d_model)
-        self.head = nn.Linear(d_model, vocab_size, bias=False)
-
-        # Tie weights (common practice)
-        self.token_embedding.weight = self.head.weight
-
-    def forward(self, x):
-        batch, seq_len = x.shape
-        device = x.device
-
-        # Embeddings
-        tok_emb = self.token_embedding(x)
-        pos = torch.arange(0, seq_len, device=device).unsqueeze(0)
-        pos_emb = self.pos_embedding(pos)
-        x = tok_emb + pos_emb
-
-        # Causal mask
-        mask = torch.tril(torch.ones(seq_len, seq_len, device=device))
-        mask = mask.unsqueeze(0).unsqueeze(0)
-
-        # Transformer blocks
-        for block in self.blocks:
-            x = block(x, mask)
-
-        x = self.ln_f(x)
-        logits = self.head(x)
-        return logits
-
-    @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0):
-        """Autoregressive generation."""
-        for _ in range(max_new_tokens):
-            logits = self(idx)
-            logits = logits[:, -1, :] / temperature
-            probs = F.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)
-            idx = torch.cat([idx, next_token], dim=1)
-        return idx
-
-gpt = GPT(vocab_size=10000, d_model=256, num_heads=4, num_layers=4)
-print(f"GPT parameters: {sum(p.numel() for p in gpt.parameters()):,}")
-
-# Test generation
-start_tokens = torch.randint(0, 10000, (1, 5))
-generated = gpt.generate(start_tokens, max_new_tokens=10)
-print(f"\nStart tokens: {start_tokens.shape}")
-print(f"Generated:    {generated.shape}")
-
-# -----------------------------------------------------------------------------
-# STEP 9: Using PyTorch's Built-in Transformer
-# -----------------------------------------------------------------------------
-print("\n" + "=" * 60)
-print("PYTORCH BUILT-IN TRANSFORMER")
-print("=" * 60)
-
-# PyTorch provides optimized implementations
-encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, dim_feedforward=2048)
-encoder = nn.TransformerEncoder(encoder_layer, num_layers=6)
-
-x = torch.randn(10, 2, 512)  # (seq, batch, d_model) - note different order!
-out = encoder(x)
-print(f"nn.TransformerEncoder: {x.shape} -> {out.shape}")
-
-# Full transformer
-transformer = nn.Transformer(d_model=512, nhead=8, num_encoder_layers=6, num_decoder_layers=6)
-src = torch.randn(10, 2, 512)
-tgt = torch.randn(20, 2, 512)
-out = transformer(src, tgt)
-print(f"nn.Transformer: src={src.shape}, tgt={tgt.shape} -> {out.shape}")
-
-# -----------------------------------------------------------------------------
-# KEY CONCEPTS FOR WORLD MODELS
-# -----------------------------------------------------------------------------
-"""
-WHY TRANSFORMERS FOR WORLD MODELS:
-
-1. PARALLEL TRAINING:
-   - RNNs: Sequential, slow
-   - Transformers: Parallel, fast (huge speedup)
-
-2. LONG-RANGE DEPENDENCIES:
-   - Direct attention to any past state
-   - No information bottleneck
-
-3. SCALABILITY:
-   - Transformers scale better with data and compute
-   - Empirically: larger = better
-
-TRANSFORMER WORLD MODELS:
-
-1. IRIS (2023):
-   - Transformer predicts next tokens in latent space
-   - Discrete tokens from VQ-VAE
-   - State-of-the-art on Atari
-
-2. GENIE (2024):
-   - Transformer generates interactive video game worlds
-   - Learns actions from unlabeled video
-
-3. GAIA-1 (2023):
-   - Transformer world model for autonomous driving
-   - Attention over past frames
-
-4. TransDreamer:
-   - Replaces RNN with Transformer in Dreamer
-
-ARCHITECTURE PATTERN FOR WORLD MODELS:
-    [Observation] -> [Encoder (VAE)] -> [Discrete Tokens]
-         |                                    |
-         v                                    v
-    [Action] -----> [Transformer] -------> [Next Tokens]
-                          |
-                          v
-                    [Decoder] -> [Predicted Frame]
-
-NEXT: Reinforcement Learning basics - where world models are used!
-"""
-
-# -----------------------------------------------------------------------------
-# EXERCISE:
-# 1. Implement FlashAttention-style chunked attention for long sequences
-# 2. Add rotary positional encoding (RoPE) to the GPT model
-# 3. Train a small GPT on character-level Shakespeare text
-# 4. Implement KV-caching for faster inference
-# 5. Add gradient checkpointing for memory efficiency
-# -----------------------------------------------------------------------------
+if __name__ == "__main__":
+    main()
