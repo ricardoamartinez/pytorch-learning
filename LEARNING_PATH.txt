@@ -1,0 +1,262 @@
+================================================================================
+              PyTorch Learning Path: From Basics to World Models
+================================================================================
+
+Welcome! Since you already understand ML concepts, this focuses on the CODE.
+This curriculum progresses from PyTorch basics to implementing world models.
+
+================================================================================
+                            PART 1: PYTORCH FOUNDATIONS
+================================================================================
+
+1. 01_python_basics.py
+   - Variables, lists, loops, functions, conditionals
+   - SKIP IF: You already know Python basics
+
+2. 02_tensors_intro.py
+   - Creating tensors (PyTorch's core data structure)
+   - Shapes, dtypes, devices (CPU/GPU)
+   - Basic operations and indexing
+   - CONCEPTS: Think of tensors as GPU-enabled numpy arrays
+
+3. 03_autograd.py
+   - Automatic differentiation
+   - How PyTorch computes gradients (backprop)
+   - requires_grad, backward(), grad
+   - CONCEPTS: Computational graph, gradient tracking
+
+4. 04_neural_network.py
+   - nn.Module (base class for models)
+   - Common layers (Linear, Conv2d, etc.)
+   - nn.Sequential vs custom modules
+   - train() vs eval() modes
+   - CONCEPTS: Layer definitions, forward pass
+
+5. 05_training_loop.py
+   - DataLoader for batching
+   - Complete training loop pattern
+   - Loss functions and optimizers
+   - Saving/loading models
+   - CONCEPTS: The core training loop pattern
+
+6. 06_cnn_example.py
+   - Real example: MNIST classification
+   - Conv2d, MaxPool2d, Dropout
+   - Image preprocessing with transforms
+   - CONCEPTS: Full end-to-end CNN project
+
+================================================================================
+                         PART 2: SEQUENCE MODELING
+================================================================================
+
+7. 07_rnn_lstm.py
+   - Recurrent Neural Networks (RNN, LSTM, GRU)
+   - Processing sequences step by step
+   - Hidden states as memory
+   - Bidirectional and stacked RNNs
+   - CONCEPTS: Temporal modeling, many-to-one, many-to-many
+
+8. 08_sequence_prediction.py
+   - Predicting future values in sequences
+   - Autoregressive generation
+   - Encoder-decoder architecture
+   - Teacher forcing
+   - CONCEPTS: Time series forecasting, sequence-to-sequence
+
+================================================================================
+                        PART 3: REPRESENTATION LEARNING
+================================================================================
+
+9. 09_autoencoders.py
+   - Learning compressed representations
+   - Encoder-decoder architecture
+   - Convolutional autoencoders for images
+   - Denoising autoencoders
+   - CONCEPTS: Latent space, dimensionality reduction
+
+10. 10_vae.py
+    - Variational Autoencoders
+    - Probabilistic latent space
+    - Reparameterization trick
+    - KL divergence loss
+    - CONCEPTS: Generative models, sampling, ELBO
+
+================================================================================
+                      PART 4: ATTENTION AND TRANSFORMERS
+================================================================================
+
+11. 11_attention.py
+    - Attention mechanisms
+    - Scaled dot-product attention
+    - Multi-head attention
+    - Self-attention vs cross-attention
+    - Positional encoding
+    - CONCEPTS: Query, key, value; attending to relevant information
+
+12. 12_transformers.py
+    - Full Transformer architecture
+    - Encoder and decoder blocks
+    - GPT-style decoder-only models
+    - Using PyTorch's nn.Transformer
+    - CONCEPTS: Parallel processing, long-range dependencies
+
+================================================================================
+                      PART 5: REINFORCEMENT LEARNING
+================================================================================
+
+13. 13_reinforcement_learning.py
+    - RL fundamentals (states, actions, rewards)
+    - Policy networks
+    - Value networks
+    - REINFORCE and Actor-Critic algorithms
+    - Model-free vs model-based RL
+    - CONCEPTS: Where world models fit into RL
+
+================================================================================
+                          PART 6: WORLD MODELS
+================================================================================
+
+14. 14_latent_dynamics.py
+    - Predicting dynamics in latent space
+    - Deterministic vs stochastic dynamics
+    - RSSM (Recurrent State-Space Model)
+    - Prior and posterior distributions
+    - Imagination rollouts
+    - CONCEPTS: The core of world models
+
+15. 15_world_model.py
+    - Complete Dreamer-style world model
+    - Encoder + RSSM + Decoder + Heads
+    - World model training loss
+    - Actor-Critic in imagination
+    - Full training loop (pseudocode)
+    - CONCEPTS: Putting it all together!
+
+================================================================================
+                              HOW TO RUN
+================================================================================
+
+Open terminal/command prompt:
+    cd C:\Users\RockinRain\Documents\pytorch-learning
+    python 01_python_basics.py
+
+Or in VS Code:
+    Open the file -> Click "Run Python File" button (top right)
+
+================================================================================
+                           INSTALL REQUIREMENTS
+================================================================================
+
+Basic installation:
+    pip install torch torchvision numpy
+
+For GPU support (NVIDIA):
+    Visit: https://pytorch.org/get-started/locally/
+    Select your OS, package manager, and CUDA version
+
+Optional (for RL environments):
+    pip install gymnasium
+
+================================================================================
+                    KEY PATTERNS TO MEMORIZE
+================================================================================
+
+1. Training Loop:
+   for epoch in range(epochs):
+       for x, y in train_loader:
+           pred = model(x)
+           loss = criterion(pred, y)
+           optimizer.zero_grad()
+           loss.backward()
+           optimizer.step()
+
+2. Model Definition:
+   class MyModel(nn.Module):
+       def __init__(self):
+           super().__init__()
+           self.layer = nn.Linear(10, 5)
+
+       def forward(self, x):
+           return self.layer(x)
+
+3. Evaluation Mode:
+   model.eval()
+   with torch.no_grad():
+       predictions = model(test_data)
+
+4. VAE Reparameterization:
+   def reparameterize(mu, logvar):
+       std = torch.exp(0.5 * logvar)
+       eps = torch.randn_like(std)
+       return mu + std * eps
+
+5. World Model Imagination:
+   for t in range(horizon):
+       action = policy(features)
+       h, z = dynamics.imagine(h, z, action)
+       reward = predict_reward(h, z)
+
+================================================================================
+                        WORLD MODEL ARCHITECTURE
+================================================================================
+
+    Observation ──► [Encoder/VAE] ──► Latent z
+         │                               │
+         │                               ▼
+         │                        [RSSM Dynamics] ◄── Action
+         │                               │
+         │                               ▼
+         │                         Next Latent z'
+         │                               │
+         │                    ┌──────────┴──────────┐
+         │                    │                     │
+         │              [Reward Head]         [Decoder]
+         │                    │                     │
+         │                    ▼                     ▼
+         │              Predicted r          Predicted obs
+
+================================================================================
+                          FAMOUS WORLD MODELS
+================================================================================
+
+- Dreamer (2020-2023): RSSM + Actor-Critic, state of the art on many tasks
+- MuZero (2019): Learned model + MCTS, mastered chess/Go without rules
+- IRIS (2023): Transformer dynamics with discrete tokens
+- Genie (2024): Generative world model learned from video
+- GAIA-1 (2023): World model for autonomous driving
+
+================================================================================
+                           USEFUL RESOURCES
+================================================================================
+
+PyTorch:
+- Official Tutorials: https://pytorch.org/tutorials/
+- PyTorch Docs: https://pytorch.org/docs/stable/
+- Dive into Deep Learning: https://d2l.ai/
+
+World Models:
+- Original Paper: https://worldmodels.github.io/
+- Dreamer Papers: Search "Dreamer Hafner" on arXiv
+- MuZero Paper: "Mastering Atari, Go, Chess and Shogi..."
+
+================================================================================
+                         CONGRATULATIONS!
+================================================================================
+
+After completing this curriculum, you will understand:
+
+✓ How to write PyTorch code from scratch
+✓ How to build and train neural networks
+✓ Sequence modeling with RNNs and Transformers
+✓ Representation learning with VAEs
+✓ Reinforcement learning basics
+✓ How world models work and how to implement them
+
+You're now ready to:
+- Read and understand world model papers
+- Implement your own world model variants
+- Experiment with different architectures
+- Apply world models to your own problems
+
+Happy learning!
+================================================================================
